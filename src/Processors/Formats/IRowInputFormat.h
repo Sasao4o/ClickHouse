@@ -99,6 +99,7 @@ private:
 
     BlockMissingValues block_missing_values;
     size_t approx_bytes_read_for_chunk = 0;
+    std::exception_ptr connection_error_exception;
 };
 
 }

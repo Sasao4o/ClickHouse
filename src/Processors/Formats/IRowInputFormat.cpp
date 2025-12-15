@@ -32,6 +32,7 @@ namespace ErrorCodes
     extern const int UNKNOWN_ELEMENT_OF_ENUM;
     extern const int CANNOT_PARSE_ESCAPE_SEQUENCE;
     extern const int UNEXPECTED_DATA_AFTER_PARSED_VALUE;
+    extern const int SOCKET_TIMEOUT;
 }
 
 
@@ -58,6 +59,16 @@ bool isParseError(int code)
         || code == ErrorCodes::UNEXPECTED_DATA_AFTER_PARSED_VALUE;
 }
 
+bool isConnectionError(int code)
+{
+    return code == ErrorCodes::SOCKET_TIMEOUT;
+        // || code == ErrorCodes::NETWORK_ERROR
+        // || code == ErrorCodes::CANNOT_READ_FROM_SOCKET
+        // || code == ErrorCodes::CANNOT_WRITE_TO_SOCKET
+        // || code == ErrorCodes::CONNECTION_TIMED_OUT
+        // || code == ErrorCodes::CONNECTION_RESET_BY_PEER;
+ 
+}
 IRowInputFormat::IRowInputFormat(SharedHeader header, ReadBuffer & in_, Params params_)
     : IInputFormat(std::move(header), &in_)
     , serializations(getPort().getHeader().getSerializations())
@@ -93,6 +104,10 @@ void IRowInputFormat::logError()
 
 Chunk IRowInputFormat::read()
 {
+    if (connection_error_exception)
+    {
+        std::rethrow_exception(connection_error_exception);
+    }
     if (total_rows == 0)
     {
         try
@@ -220,6 +235,30 @@ Chunk IRowInputFormat::read()
     }
     catch (Exception & e)
     {
+    if (isConnectionError(e.code())) {
+        connection_error_exception = std::current_exception();
+        if (columns.empty() || columns[0]->empty())
+        {
+ 
+
+            if (num_errors && (params.allow_errors_num > 0 || params.allow_errors_ratio > 0))
+            {
+                LoggerPtr log = getLogger("IRowInputFormat");
+                LOG_DEBUG(log, "Skipped {} rows with errors while reading the input stream", num_errors);
+            }
+
+            readSuffix();
+            return {};
+        }
+            LoggerPtr log = getLogger("IRowInputFormat");
+            LOG_INFO(log, "Connection Error But I Will Finalize {} ", columns.size());
+        for (const auto & column : columns)
+            column->finalize();
+
+        Chunk chunk(std::move(columns), num_rows);
+        approx_bytes_read_for_chunk = getDataOffsetMaybeCompressed(getReadBuffer()) - chunk_start_offset;
+        return chunk;           
+        }
         if (!isParseError(e.code()))
             throw;
 

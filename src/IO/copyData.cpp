@@ -3,7 +3,8 @@
 #include <IO/ReadBuffer.h>
 #include <IO/WriteBuffer.h>
 #include <IO/copyData.h>
-
+#include <Common/Logger.h>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -19,6 +20,9 @@ namespace
 void copyDataImpl(ReadBuffer & from, WriteBuffer & to, bool check_bytes, size_t bytes, const std::atomic<int> * is_cancelled, ThrottlerPtr throttler)
 {
     /// If read to the end of the buffer, eof() either fills the buffer with new data and moves the cursor to the beginning, or returns false.
+           auto log = getLogger("copyDataImpl");
+    size_t initial_bytes = bytes;
+
     while (bytes > 0 && !from.eof())
     {
         if (is_cancelled && *is_cancelled)
@@ -30,17 +34,29 @@ void copyDataImpl(ReadBuffer & from, WriteBuffer & to, bool check_bytes, size_t 
         from.position() += count;
         bytes -= count;
 
-        if (throttler)
+        if (throttler) {
             throttler->throttle(count);
+        }
+                LOG_INFO(log,
+                  "Copied {} bytes, {} bytes left to fulfill request, WriteBuffer position: {}",
+                  count, bytes, static_cast<void*>(to.position()));
+
     }
 
     if (check_bytes && bytes > 0)
         throw Exception(ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF, "Attempt to read after EOF, left to copy {} bytes.", bytes);
-}
+    LOG_INFO(log, "Finished copyDataImpl, total requested: {}, bytes left: {}",
+             initial_bytes, bytes);
+
+
+    }
 
 void copyDataImpl(ReadBuffer & from, WriteBuffer & to, bool check_bytes, size_t bytes, std::function<void()> cancellation_hook, ThrottlerPtr throttler)
 {
+        auto log = getLogger("copyDataImpl");
+
     /// If read to the end of the buffer, eof() either fills the buffer with new data and moves the cursor to the beginning, or returns false.
+    size_t initial_bytes = bytes;
     while (bytes > 0 && !from.eof())
     {
         if (cancellation_hook)
@@ -52,12 +68,20 @@ void copyDataImpl(ReadBuffer & from, WriteBuffer & to, bool check_bytes, size_t 
         from.position() += count;
         bytes -= count;
 
-        if (throttler)
+        if (throttler) {
             throttler->throttle(count);
+        }
+                    LOG_INFO(log,
+                  "Copied {} bytes, {} bytes left to fulfill request, WriteBuffer position: {}",
+                  count, bytes, static_cast<void*>(to.position()));
+
     }
 
     if (check_bytes && bytes > 0)
         throw Exception(ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF, "Attempt to read after EOF.");
+    LOG_INFO(log, "Finished copyDataImpl, total requested: {}, bytes left: {}",
+             initial_bytes, bytes);
+
 }
 
 }

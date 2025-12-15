@@ -10,7 +10,8 @@
 #include <Common/CurrentMetrics.h>
 #include <Common/AsyncTaskExecutor.h>
 #include <Common/checkSSLReturnCode.h>
-
+#include <Common/Logger.h>
+#include <Common/logger_useful.h>
 namespace ProfileEvents
 {
     extern const Event NetworkReceiveElapsedMicroseconds;
@@ -34,7 +35,20 @@ namespace ErrorCodes
 
 ssize_t ReadBufferFromPocoSocketBase::socketReceiveBytesImpl(char * ptr, size_t size)
 {
+    auto log = getLogger("ReadBufferFromPocoSocket");
+
     ssize_t bytes_read = 0;
+
+    LOG_INFO(
+    log,
+    "Start socket receive: ptr={}, size={}, async={}, secure={}, peer={}, local={}",
+    static_cast<void *>(ptr),
+    size,
+    static_cast<bool>(async_callback),
+    socket.secure(),
+    peer_address.toString(),
+    socket.address().toString());
+
     Stopwatch watch;
 
     SCOPE_EXIT({
@@ -76,6 +90,11 @@ ssize_t ReadBufferFromPocoSocketBase::socketReceiveBytesImpl(char * ptr, size_t 
         else
         {
             bytes_read = socket.impl()->receiveBytes(ptr, static_cast<int>(size));
+            LOG_INFO(
+                log,
+                "Attempt receiveBytes(size={})",
+                size);
+
         }
     }
     catch (const Poco::Net::NetException & e)
@@ -95,9 +114,14 @@ ssize_t ReadBufferFromPocoSocketBase::socketReceiveBytesImpl(char * ptr, size_t 
 
     if (bytes_read < 0)
         throw NetException(ErrorCodes::CANNOT_READ_FROM_SOCKET, "Cannot read from socket (peer: {}, local: {})", peer_address.toString(), socket.address().toString());
+    LOG_INFO(
+        log,
+        "Blocking socket read RETURNED: bytes_read={}, elapsed={} us",
+        bytes_read,
+        watch.elapsedMicroseconds());
 
-    return bytes_read;
-}
+        return bytes_read;
+    }
 
 bool ReadBufferFromPocoSocketBase::nextImpl()
 {
